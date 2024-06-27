@@ -195,7 +195,13 @@ def check_satisfiability(root):
 
 
 def main():
-    input_str = "(p -> (q & r))"
+    input_str = "(p -> q) & (~p -> q) & ~q"
+
+    # Failed Test Cases
+    # "(p -> q) & (~q -> ~p) & ~(p <-> q)" Should be false, returns true
+    # "(p | q) & ~p & ~q" Should be false, returns true
+    # "~(p | q) & (p | q)" Should be false, returns true
+
     formula = parse_formula(input_str)
     root = Node(formula)
     satisfiable = check_satisfiability(root)
