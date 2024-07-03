@@ -1,4 +1,6 @@
 import re
+import pydot
+import os
 
 
 class Formula:
@@ -15,40 +17,74 @@ class Formula:
         else:
             return self.value
 
+    def is_variable(self):
+        return not self.left and not self.right and self.value.isalpha()
+
 
 def parse_formula(input_str):
-    # Remove spaces for easier parsing
     input_str = re.sub(r'\s+', '', input_str)
 
     def parse_expression(expression):
-        # Handle parentheses
         if expression[0] == '(' and expression[-1] == ')':
             expression = expression[1:-1]
 
-        # Logical operators precedence
-        operators = ['<->', '->', '|', '&']
+        operators = ['<->', '->', '&', '|']
         for op in operators:
-            parts = expression.split(op)
+            parts = split_expression(expression, op)
             if len(parts) > 1:
-                left = parse_expression(parts[0])
-                right = parse_expression(op.join(parts[1:]))
-                formula = Formula(op)
-                formula.left = left
-                formula.right = right
-                return formula
+                if op == '&':
+                    result = parse_expression(parts[0])
+                    for part in parts[1:]:
+                        new_formula = Formula('&')
+                        new_formula.left = result
+                        new_formula.right = parse_expression(part)
+                        result = new_formula
+                    return result
+                elif op == '<->':
+                    left = parse_expression(parts[0])
+                    right = parse_expression(parts[1])
+                    formula = Formula('<->')
+                    formula.left = left
+                    formula.right = right
+                    return formula
+                else:
+                    left = parse_expression(parts[0])
+                    right = parse_expression(op.join(parts[1:]))
+                    formula = Formula(op)
+                    formula.left = left
+                    formula.right = right
+                    return formula
 
-        # Handle NOT operator
         if expression[0] == '~':
             subformula = parse_expression(expression[1:])
             formula = Formula('~')
             formula.left = subformula
             return formula
 
-        # Handle variables
         return Formula(expression)
 
     return parse_expression(input_str)
 
+
+def split_expression(expression, operator):
+    parts = []
+    depth = 0
+    current_part = []
+    i = 0
+    while i < len(expression):
+        if expression[i] == '(':
+            depth += 1
+        elif expression[i] == ')':
+            depth -= 1
+        if depth == 0 and expression[i:i + len(operator)] == operator:
+            parts.append(''.join(current_part))
+            current_part = []
+            i += len(operator)
+            continue
+        current_part.append(expression[i])
+        i += 1
+    parts.append(''.join(current_part))
+    return parts
 
 class Node:
     def __init__(self, formula, parent=None):
@@ -64,19 +100,16 @@ class Node:
 def expand_node(node):
     formula = node.formula
     if formula.value == '&':
-        # Conjunction: Both parts must be true
         left_child = Node(formula.left, node)
         right_child = Node(formula.right, node)
         node.children.append(left_child)
         node.children.append(right_child)
     elif formula.value == '|':
-        # Disjunction: At least one part must be true
         left_child = Node(formula.left, node)
         right_child = Node(formula.right, node)
         node.children.append(left_child)
         node.children.append(right_child)
     elif formula.value == '->':
-        # Implication: If left is true, right must be true
         not_left = Formula('~')
         not_left.left = formula.left
         left_child = Node(not_left, node)
@@ -84,7 +117,6 @@ def expand_node(node):
         node.children.append(left_child)
         node.children.append(right_child)
     elif formula.value == '<->':
-        # Biconditional: Both parts must be equivalent
         left_imp_right = Formula('->')
         left_imp_right.left = formula.left
         left_imp_right.right = formula.right
@@ -96,9 +128,7 @@ def expand_node(node):
         node.children.append(left_child)
         node.children.append(right_child)
     elif formula.value == '~':
-        # Negation: Handle negation of conjunction, disjunction, implication, and double negation
         if formula.left.value == '&':
-            # Negation of a conjunction: at least one part must be false
             not_left = Formula('~')
             not_left.left = formula.left.left
             not_right = Formula('~')
@@ -106,7 +136,6 @@ def expand_node(node):
             node.children.append(Node(not_left, node))
             node.children.append(Node(not_right, node))
         elif formula.left.value == '|':
-            # Negation of a disjunction: both parts must be false
             not_left = Formula('~')
             not_left.left = formula.left.left
             not_right = Formula('~')
@@ -114,14 +143,12 @@ def expand_node(node):
             node.children.append(Node(not_left, node))
             node.children.append(Node(not_right, node))
         elif formula.left.value == '->':
-            # Negation of an implication: left is true and right is false
             left = formula.left.left
             not_right = Formula('~')
             not_right.left = formula.left.right
             node.children.append(Node(left, node))
             node.children.append(Node(not_right, node))
         elif formula.left.value == '<->':
-            # Negation of a biconditional: parts are not equivalent
             not_left_imp_right = Formula('~')
             left_imp_right = Formula('->')
             left_imp_right.left = formula.left.left
@@ -137,7 +164,6 @@ def expand_node(node):
             node.children.append(Node(not_left_imp_right, node))
             node.children.append(Node(not_right_imp_left, node))
         elif formula.left.value == '~':
-            # Double negation elimination
             node.children.append(Node(formula.left.left, node))
 
 
@@ -146,11 +172,13 @@ def is_contradiction(node):
     current = node
     while current:
         if isinstance(current.formula, Formula):
-            if current.formula.value == '~' and isinstance(current.formula.left, Formula):
-                literal = current.formula.left.value
-                if literal in literals:
-                    return True
-                literals.add(f"~{literal}")
+            if current.formula.value == '~':
+                if isinstance(current.formula.left,
+                              Formula) and not current.formula.left.left and not current.formula.left.right:
+                    literal = current.formula.left.value
+                    if literal in literals:
+                        return True
+                    literals.add(f"~{literal}")
             elif not current.formula.left and not current.formula.right:
                 literal = current.formula.value
                 if f"~{literal}" in literals:
@@ -168,7 +196,7 @@ def check_satisfiability(root):
             return True
         if node.formula.value == '&':
             return all(is_branch_satisfiable(child) for child in node.children)
-        else:  # '|', '->', '<->', '~'
+        else:
             return any(is_branch_satisfiable(child) for child in node.children)
 
     stack = [root]
@@ -185,7 +213,6 @@ def check_satisfiability(root):
             else:
                 stack.append(child)
 
-        # Check if the current node should be closed based on its children
         if node.formula.value == '&' and any(child.closed for child in node.children):
             node.closed = True
         elif node.formula.value in {'|', '->', '<->', '~'} and all(child.closed for child in node.children):
@@ -194,15 +221,39 @@ def check_satisfiability(root):
     return is_branch_satisfiable(root)
 
 
+def expand_and_visualize(node, graph, parent_node=None):
+    expand_node(node)
+    current_node = pydot.Node(str(node.formula), shape='ellipse', style='filled', fillcolor='lightblue')
+    graph.add_node(current_node)
+
+    if parent_node is not None:
+        edge = pydot.Edge(parent_node, current_node)
+        graph.add_edge(edge)
+
+    for child in node.children:
+        expand_and_visualize(child, graph, current_node)
+
+
+def visualize_tree(root):
+    graph = pydot.Dot(graph_type='graph')
+    expand_and_visualize(root, graph)
+    graph.write_png('tree_diagram.png')
+
+
+# Main function to parse, build tree, and visualize
 def main():
-    input_str = "(p -> q) & (~p -> q) & ~q"
+    # Set Graphviz path (example path)
+    os.environ["PATH"] += os.pathsep + 'C:/Program Files/Graphviz/bin/'
 
-    # Failed Test Cases
-    # "(p -> q) & (~q -> ~p) & ~(p <-> q)" Should be false, returns true
-    # "(p | q) & ~p & ~q" Should be false, returns true
-    # "~(p | q) & (p | q)" Should be false, returns true
-
+    input_str = "(p -> q) & (~q -> ~p) & ~(p <-> q)"
     formula = parse_formula(input_str)
+    print(formula)
+    root = Node(formula)
+
+    # Visualize the tree
+    visualize_tree(root)
+
+    print(f"Testing: {input_str}")
     root = Node(formula)
     satisfiable = check_satisfiability(root)
     if satisfiable:
