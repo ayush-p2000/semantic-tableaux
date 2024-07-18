@@ -91,5 +91,6 @@ def main():
     parsed_formula = parse_formula(input_formula)
     print(parsed_formula)
 
+
 if __name__ == '__main__':
     main()
