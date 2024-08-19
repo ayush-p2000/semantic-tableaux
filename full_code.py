@@ -1,266 +1,520 @@
-import re
+import io
+import tempfile
+import threading
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import List, Tuple, Set, Dict
+import logging
 import pydot
-import os
 
 
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+class TimeoutError(Exception):
+    pass
+
+
+def run_with_timeout(func, args=(), kwargs={}, timeout_duration=10):
+    result = [TimeoutError('function {} timed out after {} seconds'.format(func.__name__, timeout_duration))]
+
+    def worker():
+        try:
+            result[0] = func(*args, **kwargs)
+        except Exception as e:
+            result[0] = e
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join(timeout_duration)
+    if thread.is_alive():
+        return TimeoutError('function {} timed out after {} seconds'.format(func.__name__, timeout_duration))
+    if isinstance(result[0], Exception):
+        raise result[0]
+    return result[0]
+
+
+@dataclass
 class Formula:
-    def __init__(self, value):
-        self.value = value
-        self.left = None
-        self.right = None
-
-    def __repr__(self):
-        if self.left and self.right:
-            return f"({self.left} {self.value} {self.right})"
-        elif self.left:
-            return f"({self.value} {self.left})"
-        else:
-            return self.value
-
-    def is_variable(self):
-        return not self.left and not self.right and self.value.isalpha()
+    pass
 
 
-def parse_formula(input_str):
-    input_str = re.sub(r'\s+', '', input_str)
-
-    def parse_expression(expression):
-        if expression[0] == '(' and expression[-1] == ')':
-            expression = expression[1:-1]
-
-        operators = ['<->', '->', '&', '|']
-        for op in operators:
-            parts = split_expression(expression, op)
-            if len(parts) > 1:
-                if op == '&':
-                    result = parse_expression(parts[0])
-                    for part in parts[1:]:
-                        new_formula = Formula('&')
-                        new_formula.left = result
-                        new_formula.right = parse_expression(part)
-                        result = new_formula
-                    return result
-                elif op == '<->':
-                    left = parse_expression(parts[0])
-                    right = parse_expression(parts[1])
-                    formula = Formula('<->')
-                    formula.left = left
-                    formula.right = right
-                    return formula
-                else:
-                    left = parse_expression(parts[0])
-                    right = parse_expression(op.join(parts[1:]))
-                    formula = Formula(op)
-                    formula.left = left
-                    formula.right = right
-                    return formula
-
-        if expression[0] == '~':
-            subformula = parse_expression(expression[1:])
-            formula = Formula('~')
-            formula.left = subformula
-            return formula
-
-        return Formula(expression)
-
-    return parse_expression(input_str)
+@dataclass
+class Atom(Formula):
+    name: str
 
 
-def split_expression(expression, operator):
-    parts = []
-    depth = 0
-    current_part = []
-    i = 0
-    while i < len(expression):
-        if expression[i] == '(':
-            depth += 1
-        elif expression[i] == ')':
-            depth -= 1
-        if depth == 0 and expression[i:i + len(operator)] == operator:
-            parts.append(''.join(current_part))
-            current_part = []
-            i += len(operator)
-            continue
-        current_part.append(expression[i])
-        i += 1
-    parts.append(''.join(current_part))
-    return parts
-
-class Node:
-    def __init__(self, formula, parent=None):
-        self.formula = formula
-        self.parent = parent
-        self.children = []
-        self.closed = False
-
-    def __repr__(self):
-        return f"Node({self.formula}, closed={self.closed})"
+@dataclass
+class Not(Formula):
+    formula: Formula
 
 
-def expand_node(node):
-    formula = node.formula
-    if formula.value == '&':
-        left_child = Node(formula.left, node)
-        right_child = Node(formula.right, node)
-        node.children.append(left_child)
-        node.children.append(right_child)
-    elif formula.value == '|':
-        left_child = Node(formula.left, node)
-        right_child = Node(formula.right, node)
-        node.children.append(left_child)
-        node.children.append(right_child)
-    elif formula.value == '->':
-        not_left = Formula('~')
-        not_left.left = formula.left
-        left_child = Node(not_left, node)
-        right_child = Node(formula.right, node)
-        node.children.append(left_child)
-        node.children.append(right_child)
-    elif formula.value == '<->':
-        left_imp_right = Formula('->')
-        left_imp_right.left = formula.left
-        left_imp_right.right = formula.right
-        right_imp_left = Formula('->')
-        right_imp_left.left = formula.right
-        right_imp_left.right = formula.left
-        left_child = Node(left_imp_right, node)
-        right_child = Node(right_imp_left, node)
-        node.children.append(left_child)
-        node.children.append(right_child)
-    elif formula.value == '~':
-        if formula.left.value == '&':
-            not_left = Formula('~')
-            not_left.left = formula.left.left
-            not_right = Formula('~')
-            not_right.left = formula.left.right
-            node.children.append(Node(not_left, node))
-            node.children.append(Node(not_right, node))
-        elif formula.left.value == '|':
-            not_left = Formula('~')
-            not_left.left = formula.left.left
-            not_right = Formula('~')
-            not_right.left = formula.left.right
-            node.children.append(Node(not_left, node))
-            node.children.append(Node(not_right, node))
-        elif formula.left.value == '->':
-            left = formula.left.left
-            not_right = Formula('~')
-            not_right.left = formula.left.right
-            node.children.append(Node(left, node))
-            node.children.append(Node(not_right, node))
-        elif formula.left.value == '<->':
-            not_left_imp_right = Formula('~')
-            left_imp_right = Formula('->')
-            left_imp_right.left = formula.left.left
-            left_imp_right.right = formula.left.right
-            not_left_imp_right.left = left_imp_right
-
-            not_right_imp_left = Formula('~')
-            right_imp_left = Formula('->')
-            right_imp_left.left = formula.left.right
-            right_imp_left.right = formula.left.left
-            not_right_imp_left.left = right_imp_left
-
-            node.children.append(Node(not_left_imp_right, node))
-            node.children.append(Node(not_right_imp_left, node))
-        elif formula.left.value == '~':
-            node.children.append(Node(formula.left.left, node))
+@dataclass
+class And(Formula):
+    conjuncts: List[Formula]
 
 
-def is_contradiction(node):
-    literals = set()
-    current = node
-    while current:
-        if isinstance(current.formula, Formula):
-            if current.formula.value == '~':
-                if isinstance(current.formula.left,
-                              Formula) and not current.formula.left.left and not current.formula.left.right:
-                    literal = current.formula.left.value
-                    if literal in literals:
-                        return True
-                    literals.add(f"~{literal}")
-            elif not current.formula.left and not current.formula.right:
-                literal = current.formula.value
-                if f"~{literal}" in literals:
-                    return True
-                literals.add(literal)
-        current = current.parent
+@dataclass
+class Or(Formula):
+    disjuncts: List[Formula]
+
+
+@dataclass
+class Implies(Formula):
+    left: Formula
+    right: Formula
+
+
+@dataclass
+class Box(Formula):
+    formula: Formula
+
+
+@dataclass
+class Diamond(Formula):
+    formula: Formula
+
+
+Branch = List[Tuple[bool, str, Formula]]
+
+
+def is_satisfied(formula, pos, neg):
+    if isinstance(formula, Atom):
+        return formula.name in pos
+    elif isinstance(formula, Not):
+        return formula.formula.name in neg
     return False
 
 
-def check_satisfiability(root):
-    def is_branch_satisfiable(node):
-        if node.closed:
-            return False
-        if not node.children:
-            return True
-        if node.formula.value == '&':
-            return all(is_branch_satisfiable(child) for child in node.children)
-        else:
-            return any(is_branch_satisfiable(child) for child in node.children)
-
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        print(f"Expanding node: {node}")
-        if node.closed:
-            continue
-        expand_node(node)
-        for child in node.children:
-            if is_contradiction(child):
-                child.closed = True
-                print(f"Contradiction found at node: {child}")
+def is_closed(branch: Branch, accessibility: Dict[str, Set[str]]) -> bool:
+    world_formulas = defaultdict(lambda: (set(), set()))
+    for sign, world, formula in branch:
+        if isinstance(formula, Atom):
+            if sign:
+                world_formulas[world][0].add(formula.name)
             else:
-                stack.append(child)
+                world_formulas[world][1].add(formula.name)
 
-        if node.formula.value == '&' and any(child.closed for child in node.children):
-            node.closed = True
-        elif node.formula.value in {'|', '->', '<->', '~'} and all(child.closed for child in node.children):
-            node.closed = True
+    for world in world_formulas:
+        pos, neg = world_formulas[world]
+        if pos & neg:
+            return True
 
-    return is_branch_satisfiable(root)
-
-
-def expand_and_visualize(node, graph, parent_node=None):
-    expand_node(node)
-    current_node = pydot.Node(str(node.formula), shape='ellipse', style='filled', fillcolor='lightblue')
-    graph.add_node(current_node)
-
-    if parent_node is not None:
-        edge = pydot.Edge(parent_node, current_node)
-        graph.add_edge(edge)
-
-    for child in node.children:
-        expand_and_visualize(child, graph, current_node)
+    return False
 
 
-def visualize_tree(root):
-    graph = pydot.Dot(graph_type='graph')
-    expand_and_visualize(root, graph)
-    graph.write_png('tree_diagram.png')
+def apply_rule(sign: bool, prefix: str, formula: Formula, expanded_prefixes: set, accessibility: Dict[str, Set[str]]) -> List[List[Tuple[bool, str, Formula]]]:
+    print(f"Applying rule to: {'T' if sign else 'F'} {prefix} {Tableaux.formula_to_string(formula)}")
+
+    if isinstance(formula, Atom):
+        print(f"Atom formula: No expansion needed for {Tableaux.formula_to_string(formula)}")
+        return []  # No expansion needed for atomic formulas
+
+    elif isinstance(formula, Not):
+        print(f"Not formula: Expanding ~{Tableaux.formula_to_string(formula.formula)}")
+        return [[(not sign, prefix, formula.formula)]]
+
+    elif isinstance(formula, And):
+        if sign:
+            print(f"And formula (True): Expanding conjunction {Tableaux.formula_to_string(formula)}")
+            return [[(True, prefix, conj) for conj in formula.conjuncts]]
+        else:
+            print(f"And formula (False): Expanding conjunction {Tableaux.formula_to_string(formula)} into branches")
+            return [[(False, prefix, conj)] for conj in formula.conjuncts]
+
+    elif isinstance(formula, Or):
+        if sign:
+            print(f"Or formula (True): Expanding disjunction {Tableaux.formula_to_string(formula)} into branches")
+            return [[(True, prefix, disj)] for disj in formula.disjuncts]
+        else:
+            print(f"Or formula (False): Expanding disjunction {Tableaux.formula_to_string(formula)}")
+            return [[(False, prefix, disj) for disj in formula.disjuncts]]
+
+    elif isinstance(formula, Implies):
+        if sign:
+            print(f"Implies formula (True): Expanding implication {Tableaux.formula_to_string(formula)}")
+            return [[(False, prefix, formula.left)], [(True, prefix, formula.right)]]
+        else:
+            print(f"Implies formula (False): Expanding implication {Tableaux.formula_to_string(formula)}")
+            return [[(True, prefix, formula.left), (False, prefix, formula.right)]]
+
+    elif isinstance(formula, Box):
+        print(f"Box formula: Expanding modal operator [] in world {prefix}")
+        if sign:
+            # T []p: Only apply to existing accessible worlds
+            result = []
+            for accessible_world in accessibility[prefix]:
+                result.append((True, accessible_world, formula.formula))
+            if result:
+                print(f"Adding Box formula to accessible worlds: []{Tableaux.formula_to_string(formula.formula)}")
+                return [result]
+            else:
+                print("No accessible worlds to apply Box formula")
+                return []
+        else:
+            # F []p: create a new world
+            new_world = f"{prefix}.{len(accessibility[prefix]) + 1}"
+            accessibility[prefix].add(new_world)
+            print(f"Creating new accessible world: {new_world}")
+            return [[(False, new_world, formula.formula)]]
+
+    elif isinstance(formula, Diamond):
+        print(f"Diamond formula: Expanding modal operator <> in world {prefix}")
+        if sign:
+            # T <>p: create a new world
+            new_world = f"{prefix}.{len(accessibility[prefix]) + 1}"
+            accessibility[prefix].add(new_world)
+            print(f"Creating new accessible world: {new_world}")
+            return [[(True, new_world, formula.formula)]]
+        else:
+            # F <>p: Only apply to existing accessible worlds
+            result = []
+            for accessible_world in accessibility[prefix]:
+                result.append((False, accessible_world, formula.formula))
+            if result:
+                print(f"Adding Diamond formula to accessible worlds: <>{Tableaux.formula_to_string(formula.formula)}")
+                return [result]
+            else:
+                print("No accessible worlds to apply Diamond formula")
+                return []
+
+    return []
 
 
-# Main function to parse, build tree, and visualize
-def main():
-    # Set Graphviz path (example path)
-    os.environ["PATH"] += os.pathsep + 'C:/Program Files/Graphviz/bin/'
+class Tableaux:
+    def __init__(self, formula: Formula):
+        self.branches = None
+        self.formula = formula
+        self.node_count = 0
+        self.expanded_prefixes = set()
+        self.current_prefix = "1"
+        self.tree = {}
+        self.accessibility = defaultdict(set)
+        self.accessibility["1"] = set()
 
-    input_str = "(p -> q) & (~q -> ~p) & ~(p <-> q)"
-    formula = parse_formula(input_str)
-    print(formula)
-    root = Node(formula)
+    def check_validity(self, max_iterations=1000):
+        self.branches = [[(False, "1", self.formula)]]
+        return self.solve(max_iterations)
 
-    # Visualize the tree
-    visualize_tree(root)
+    def check_satisfiability(self, max_iterations=1000):
+        self.branches = [[(True, "1", self.formula)]]
+        return not self.solve(max_iterations)
 
-    print(f"Testing: {input_str}")
-    root = Node(formula)
-    satisfiable = check_satisfiability(root)
-    if satisfiable:
-        print("The formula is satisfiable.")
-    else:
-        print("The formula is not satisfiable.")
+    def solve(self, max_iterations):
+        for iteration in range(max_iterations):
+            print(f"Iteration {iteration}, branches: {len(self.branches)}")
+            new_branches = self.expand()
+            if new_branches == self.branches:
+                print("No more expansions possible")
+                break
+            self.branches = new_branches
+
+            # Add this part to handle accessibility relations
+            for branch in self.branches:
+                for sign, prefix, formula in branch:
+                    if isinstance(formula, Box) and sign:
+                        for accessible_world in self.accessibility[prefix]:
+                            branch.append((True, accessible_world, formula.formula))
+                    elif isinstance(formula, Diamond) and not sign:
+                        for accessible_world in self.accessibility[prefix]:
+                            branch.append((False, accessible_world, formula.formula))
+
+        self.build_tree()  # Build the tree after expansion is complete
+
+        # Check if all branches are closed
+        all_closed = all(is_closed(branch, self.accessibility) for branch in self.branches)
+        return all_closed
+
+    def expand(self):
+        new_branches = []
+        for branch in self.branches:
+            expanded_branches = self.expand_branch(branch)
+            new_branches.extend(expanded_branches)
+        return new_branches
+
+    def expand_branch(self, branch, depth=0, parent_id=None):
+        print(
+            f"\nExpanding branch at depth {depth}: {[(prefix, 'T' if sign else 'F', Tableaux.formula_to_string(formula)) for sign, prefix, formula in branch]}")
+
+        if depth > 100:  # Prevent infinite recursion
+            print(f"Warning: Maximum recursion depth reached for branch: {branch}")
+            return [branch]
+
+        node_id = self.add_node(branch, parent_id)
+
+        for i, (sign, prefix, formula) in enumerate(branch):
+            if isinstance(formula, Atom):
+                print(f"Atom found in branch, skipping: {Tableaux.formula_to_string(formula)}")
+                continue  # Skip atomic formulas
+
+            result = apply_rule(sign, prefix, formula, self.expanded_prefixes, self.accessibility)
+
+            if result:
+                print(f"Formula expanded into: {result}")
+                expanded_branches = []
+                for new_branch in result:
+                    new_full_branch = branch[:i] + new_branch + branch[i + 1:]
+                    print(
+                        f"New full branch after expansion: {[(prefix, 'T' if sign else 'F', Tableaux.formula_to_string(formula)) for sign, prefix, formula in new_full_branch]}")
+
+                    # Recursively expand the new branch
+                    if isinstance(formula, Or) and sign:
+                        for sub_branch in new_branch:
+                            expanded_branches.extend(
+                                self.expand_branch([sub_branch] + new_full_branch[i + 1:], depth + 1, node_id))
+                    elif isinstance(formula, (Box, Diamond)):
+                        expanded_branches = []
+                        for new_branch in result:
+                            new_full_branch = branch[:i] + new_branch + branch[i + 1:]
+                            expanded_branches.extend(self.expand_branch(new_full_branch, depth + 1, node_id))
+                        return expanded_branches
+                    else:
+                        expanded_branches.extend(self.expand_branch(new_full_branch, depth + 1, node_id))
+                return expanded_branches
+
+        # If no expansion was possible, return the branch as is
+        print(
+            f"No expansion possible for branch, returning as is: {[(prefix, 'T' if sign else 'F', Tableaux.formula_to_string(formula)) for sign, prefix, formula in branch]}")
+        return [branch]
+
+    def build_tree(self):
+        self.graph = pydot.Dot(graph_type='digraph')
+        self.graph.set_rankdir('TB')
+        self.graph.set_size("12,16!")
+        self.graph.set_margin(0.5)
+
+        self.graph.set_graph_defaults(nodesep='0.7', ranksep='1.0')
+        self.graph.set_node_defaults(shape='ellipse', style='filled', fillcolor='lightblue',
+                                     width='2.5', height='1.2', fontsize='14')
+        self.graph.set_edge_defaults(arrowhead='vee', arrowsize='0.9', penwidth='1.2')
+
+        if self.tree:
+            root = next(iter(self.tree))
+            self._build_tree_recursive(root)
+        else:
+            print("Warning: Empty tree, nothing to visualize")
+
+    def _build_tree_recursive(self, node_id):
+        node_data = self.tree[node_id]
+        label = node_data['label'].replace('\n', '\\n')
+        node = pydot.Node(node_id, label=label)
+        if node_id == next(iter(self.tree)):
+            node.set('pos', '0,0!')
+        self.graph.add_node(node)
+        for child_id in node_data['children']:
+            child_node = self._build_tree_recursive(child_id)
+            self.graph.add_edge(pydot.Edge(node, child_node))
+        return node
+
+    def add_node(self, formulas: List[Tuple[bool, str, Formula]], parent_id: str = None) -> str:
+        label = "\\n".join(
+            f"{prefix} {'T' if sign else 'F'} {self.formula_to_string(formula)}" for sign, prefix, formula in formulas)
+        node_id = f'node{self.node_count}'
+        self.tree[node_id] = {'label': label, 'children': [], 'parent': parent_id}
+        self.node_count += 1
+        if parent_id:
+            self.tree[parent_id]['children'].append(node_id)
+        return node_id
+
+    def save_graph(self, filename='tableau.png'):
+        self.graph.write_png(filename, prog='dot')
+
+    def save_graph_to_file(self) -> str:
+        logger.debug("Entering save_graph_to_file method")
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp_file:
+                temp_filename = tmp_file.name
+                logger.debug(f"Temporary file created: {temp_filename}")
+                self.graph.write_png(temp_filename)
+                logger.debug(f"Graph written to temporary file")
+            return temp_filename
+        except Exception as e:
+            logger.error(f"Error in save_graph_to_file: {str(e)}")
+            raise
+
+    def print_tableau(self):
+        for i, branch in enumerate(self.branches):
+            print(f"Branch {i}:")
+            for sign, prefix, formula in branch:
+                print(f"  {prefix} {'T' if sign else 'F'} {self.formula_to_string(formula)}")
+            print()
+
+    @staticmethod
+    def formula_to_string(formula: Formula) -> str:
+        if isinstance(formula, Atom):
+            return formula.name
+        elif isinstance(formula, Not):
+            return f"~{Tableaux.formula_to_string(formula.formula)}"
+        elif isinstance(formula, And):
+            return f"({' & '.join(Tableaux.formula_to_string(c) for c in formula.conjuncts)})"
+        elif isinstance(formula, Or):
+            return f"({' | '.join(Tableaux.formula_to_string(d) for d in formula.disjuncts)})"
+        elif isinstance(formula, Implies):
+            return f"({Tableaux.formula_to_string(formula.left)} -> {Tableaux.formula_to_string(formula.right)})"
+        elif isinstance(formula, Box):
+            return f"[]{Tableaux.formula_to_string(formula.formula)}"
+        elif isinstance(formula, Diamond):
+            return f"<>{Tableaux.formula_to_string(formula.formula)}"
+        else:
+            raise ValueError(f"Unknown formula type: {type(formula)}")
 
 
-if __name__ == "__main__":
-    main()
+def custom_parse_formula(s: str) -> Formula:
+    s = s.replace(' ', '')  # Remove all spaces
+    s = s.replace('□', '[]')  # Replace □ with []
+    s = s.replace('♢', '<>')  # Replace ♢ with <>
+
+    def parse_atom(i):
+        if i < len(s) and s[i].isalpha():
+            return Atom(s[i]), i + 1
+        raise ValueError(f"Expected atom at position {i}")
+
+    def parse_not(i):
+        if i < len(s) and s[i] == '~':
+            sub_formula, new_i = parse_modal(i + 1)
+            return Not(sub_formula), new_i
+        return parse_modal(i)
+
+    def parse_modal(i):
+        if i < len(s) - 1:
+            if s[i:i + 2] == '[]':
+                sub_formula, new_i = parse_not(i + 2)
+                return Box(sub_formula), new_i
+            elif s[i:i + 2] == '<>':
+                sub_formula, new_i = parse_not(i + 2)
+                return Diamond(sub_formula), new_i
+        return parse_parentheses(i)
+
+    def parse_or(i):
+        left, i = parse_not(i)
+        while i < len(s) and s[i] == '|':
+            right, i = parse_not(i + 1)
+            left = Or([left, right])
+        return left, i
+
+    def parse_and(i):
+        left, i = parse_or(i)
+        while i < len(s) and s[i] == '&':
+            right, i = parse_or(i + 1)
+            left = And([left, right])
+        return left, i
+
+    def parse_implies(i):
+        left, i = parse_and(i)
+        if i < len(s) - 1 and s[i:i + 2] == '->':
+            right, i = parse_implies(i + 2)  # Recursive call for right side
+            return Implies(left, right), i
+        return left, i
+
+    def parse_parentheses(i):
+        if i < len(s) and s[i] == '(':
+            expr, i = parse_implies(i + 1)
+            if i < len(s) and s[i] == ')':
+                return expr, i + 1
+            raise ValueError(f"Missing closing parenthesis at position {i}")
+        return parse_atom(i)
+
+    formula, i = parse_implies(0)
+    if i < len(s):
+        raise ValueError(f"Unexpected character at position {i}: '{s[i]}'")
+    return formula
+
+
+# Test formulas and main execution
+test_formulas = [
+    # "<>(p | ~p)",                  # Valid and Satisfiable
+    # "[](p -> p)",                  # Valid and Satisfiable
+    # "<>p -> []<>p",                # Valid in S5 modal logic
+    # "[]p -> p",  # Valid (T axiom)
+    # "[]p -> [][]p",                # Valid in S4 modal logic
+    # "<>[]p -> []<>p",              # Valid in S5 modal logic
+    # "[](<>p -> q) -> (<>[]p -> []q)",  # Valid (McKinsey's formula)
+    # "<>(p & q) -> (<>p & <>q)",    # Valid and Satisfiable
+    # "[]p -> <>p",                  # Not valid in general, but Satisfiable
+    # "<>[]p -> []p",                # Not valid in general, but Satisfiable
+    "[](p | q) -> ([]p | []q)",    # Not valid, but Satisfiable
+    # "[]p -> []<>p",                # Valid in S5
+    # "<>[]p -> []p",                # Valid in S5
+    # "[]<>[]p -> []p",              # Valid in S5
+    # "([]p & []q) -> [](p & q)",    # Valid and Satisfiable
+    # "<>(p -> q) -> ([]p -> <>q)",  # Valid and Satisfiable
+    # "[]p -> (q -> []q)",           # Not valid, but Satisfiable
+    # "<>(p & ~p)",                  # Not valid, Not Satisfiable (contradiction)
+    # "<>p"
+    # "(p | ~p)"
+    # "(p & ~q)|(~p&r)",
+    # "(p|q)->r",
+    # "p & (p -> ~p)",
+    # "(p&~q)&(q->~p)",
+    # "p|~p",
+]
+
+for formula_str in test_formulas:
+    try:
+        formula = custom_parse_formula(formula_str)
+        print(f"Input: {formula_str}")
+        print(f"Parsed: {Tableaux.formula_to_string(formula)}")
+        print()
+
+        # Tableau method for validity
+        print("Checking validity:")
+        validity_solver = Tableaux(formula)
+        try:
+            is_valid = validity_solver.check_validity()
+            print(f"Validity result: {is_valid}")
+        except Exception as e:
+            print(f"Error during validity check: {str(e)}")
+            is_valid = None
+            import traceback
+
+            traceback.print_exc()
+
+        print("\nValidity check tableau:")
+        validity_solver.print_tableau()
+        try:
+            validity_solver.save_graph(filename='validity_tableau.png')
+            print("Validity tableau visualization saved as 'validity_tableau.png'")
+        except Exception as e:
+            print(f"Error saving validity tableau: {str(e)}")
+
+        print("\n" + "=" * 50 + "\n")
+
+        # Tableau method for satisfiability
+        print("Checking satisfiability:")
+        satisfiability_solver = Tableaux(formula)
+        try:
+            is_satisfiable = satisfiability_solver.check_satisfiability()
+            print(f"Satisfiability result: {is_satisfiable}")
+        except Exception as e:
+            print(f"Error during satisfiability check: {str(e)}")
+            is_satisfiable = None
+            import traceback
+
+            traceback.print_exc()
+
+        print("\nSatisfiability check tableau:")
+        satisfiability_solver.print_tableau()
+        try:
+            satisfiability_solver.save_graph(filename='satisfiability_tableau.png')
+            print("Satisfiability tableau visualization saved as 'satisfiability_tableau.png'")
+        except Exception as e:
+            print(f"Error saving satisfiability tableau: {str(e)}")
+
+        print("\n" + "=" * 50 + "\n")
+
+        if is_valid is not None and is_satisfiable is not None:
+            if is_valid:
+                print(f"The formula '{Tableaux.formula_to_string(formula)}' is valid and satisfiable.")
+            elif is_satisfiable:
+                print(f"The formula '{Tableaux.formula_to_string(formula)}' is satisfiable but not valid.")
+            else:
+                print(f"The formula '{Tableaux.formula_to_string(formula)}' is not satisfiable (contradiction).")
+        else:
+            print("Unable to determine validity and satisfiability due to errors.")
+
+    except Exception as e:
+        print(f"Error processing formula '{formula_str}': {str(e)}")
+        import traceback
+
+        traceback.print_exc()
+    print()
