@@ -80,7 +80,7 @@ def analyze_result(is_valid, is_satisfiable, formula_str):
 
 
 def main():
-    st.title("Modal Logic Tableau Solver")
+    st.title("Semantic Tableaux Solver")
 
     st.write("""
     This app uses the tableau method to check the validity and satisfiability of modal logic formulas.
