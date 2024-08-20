@@ -103,84 +103,6 @@ def is_closed(branch: Branch, accessibility: Dict[str, Set[str]]) -> bool:
     return False
 
 
-def apply_rule(sign: bool, prefix: str, formula: Formula, expanded_prefixes: set, accessibility: Dict[str, Set[str]]) -> List[List[Tuple[bool, str, Formula]]]:
-    print(f"Applying rule to: {'T' if sign else 'F'} {prefix} {Tableaux.formula_to_string(formula)}")
-
-    if isinstance(formula, Atom):
-        print(f"Atom formula: No expansion needed for {Tableaux.formula_to_string(formula)}")
-        return []  # No expansion needed for atomic formulas
-
-    elif isinstance(formula, Not):
-        print(f"Not formula: Expanding ~{Tableaux.formula_to_string(formula.formula)}")
-        return [[(not sign, prefix, formula.formula)]]
-
-    elif isinstance(formula, And):
-        if sign:
-            print(f"And formula (True): Expanding conjunction {Tableaux.formula_to_string(formula)}")
-            return [[(True, prefix, conj) for conj in formula.conjuncts]]
-        else:
-            print(f"And formula (False): Expanding conjunction {Tableaux.formula_to_string(formula)} into branches")
-            return [[(False, prefix, conj)] for conj in formula.conjuncts]
-
-    elif isinstance(formula, Or):
-        if sign:
-            print(f"Or formula (True): Expanding disjunction {Tableaux.formula_to_string(formula)} into branches")
-            return [[(True, prefix, disj)] for disj in formula.disjuncts]
-        else:
-            print(f"Or formula (False): Expanding disjunction {Tableaux.formula_to_string(formula)}")
-            return [[(False, prefix, disj) for disj in formula.disjuncts]]
-
-    elif isinstance(formula, Implies):
-        if sign:
-            print(f"Implies formula (True): Expanding implication {Tableaux.formula_to_string(formula)}")
-            return [[(False, prefix, formula.left)], [(True, prefix, formula.right)]]
-        else:
-            print(f"Implies formula (False): Expanding implication {Tableaux.formula_to_string(formula)}")
-            return [[(True, prefix, formula.left), (False, prefix, formula.right)]]
-
-    elif isinstance(formula, Box):
-        print(f"Box formula: Expanding modal operator [] in world {prefix}")
-        if sign:
-            # T []p: Only apply to existing accessible worlds
-            result = []
-            for accessible_world in accessibility[prefix]:
-                result.append((True, accessible_world, formula.formula))
-            if result:
-                print(f"Adding Box formula to accessible worlds: []{Tableaux.formula_to_string(formula.formula)}")
-                return [result]
-            else:
-                print("No accessible worlds to apply Box formula")
-                return []
-        else:
-            # F []p: create a new world
-            new_world = f"{prefix}.{len(accessibility[prefix]) + 1}"
-            accessibility[prefix].add(new_world)
-            print(f"Creating new accessible world: {new_world}")
-            return [[(False, new_world, formula.formula)]]
-
-    elif isinstance(formula, Diamond):
-        print(f"Diamond formula: Expanding modal operator <> in world {prefix}")
-        if sign:
-            # T <>p: create a new world
-            new_world = f"{prefix}.{len(accessibility[prefix]) + 1}"
-            accessibility[prefix].add(new_world)
-            print(f"Creating new accessible world: {new_world}")
-            return [[(True, new_world, formula.formula)]]
-        else:
-            # F <>p: Only apply to existing accessible worlds
-            result = []
-            for accessible_world in accessibility[prefix]:
-                result.append((False, accessible_world, formula.formula))
-            if result:
-                print(f"Adding Diamond formula to accessible worlds: <>{Tableaux.formula_to_string(formula.formula)}")
-                return [result]
-            else:
-                print("No accessible worlds to apply Diamond formula")
-                return []
-
-    return []
-
-
 class Tableaux:
     def __init__(self, formula: Formula):
         self.branches = None
@@ -191,6 +113,17 @@ class Tableaux:
         self.tree = {}
         self.accessibility = defaultdict(set)
         self.accessibility["1"] = set()
+        self.deferred_expansions = []
+        self.new_world_created = False
+        self.graph = pydot.Dot(graph_type='digraph')
+        self.graph.set_rankdir('TB')
+        self.graph.set_size("12,16!")
+        self.graph.set_margin(0.5)
+        self.graph.set_graph_defaults(nodesep='0.7', ranksep='1.0')
+        self.graph.set_node_defaults(shape='ellipse', style='filled', fillcolor='lightblue',
+                                     width='2.5', height='1.2', fontsize='14')
+        self.graph.set_edge_defaults(arrowhead='vee', arrowsize='0.9', penwidth='1.2')
+
 
     def check_validity(self, max_iterations=1000):
         self.branches = [[(False, "1", self.formula)]]
@@ -203,27 +136,35 @@ class Tableaux:
     def solve(self, max_iterations):
         for iteration in range(max_iterations):
             print(f"Iteration {iteration}, branches: {len(self.branches)}")
+            self.new_world_created = False  # Reset the new world creation flag
             new_branches = self.expand()
+
             if new_branches == self.branches:
                 print("No more expansions possible")
                 break
-            self.branches = new_branches
 
-            # Add this part to handle accessibility relations
-            for branch in self.branches:
-                for sign, prefix, formula in branch:
-                    if isinstance(formula, Box) and sign:
-                        for accessible_world in self.accessibility[prefix]:
-                            branch.append((True, accessible_world, formula.formula))
-                    elif isinstance(formula, Diamond) and not sign:
-                        for accessible_world in self.accessibility[prefix]:
-                            branch.append((False, accessible_world, formula.formula))
+            # Apply deferred expansions if no new world has been created
+            if not self.new_world_created:
+                self.apply_deferred_expansions()
+
+            self.branches = new_branches
 
         self.build_tree()  # Build the tree after expansion is complete
 
         # Check if all branches are closed
         all_closed = all(is_closed(branch, self.accessibility) for branch in self.branches)
         return all_closed
+
+    def apply_deferred_expansions(self):
+        """Process the deferred expansions for T [] and F <> formulas"""
+        print(f"Processing deferred expansions: {len(self.deferred_expansions)}")
+        deferred_branches = []
+        for branch in self.deferred_expansions:
+            expanded_branches = self.expand_branch(branch)
+            deferred_branches.extend(expanded_branches)
+
+        self.branches.extend(deferred_branches)
+        self.deferred_expansions.clear()  # Clear deferred expansions after processing
 
     def expand(self):
         new_branches = []
@@ -242,12 +183,30 @@ class Tableaux:
 
         node_id = self.add_node(branch, parent_id)
 
+        # First, expand all F [] formulas
+        f_box_formulas = [(i, (sign, prefix, formula)) for i, (sign, prefix, formula) in enumerate(branch)
+                          if isinstance(formula, Box) and not sign]
+
+        for i, (sign, prefix, formula) in f_box_formulas:
+            result = self.apply_rule(sign, prefix, formula)
+            if result:
+                for new_branch in result:
+                    new_full_branch = branch[:i] + new_branch + branch[i + 1:]
+                    expanded_branches = self.expand_branch(new_full_branch, depth + 1, node_id)
+                    if expanded_branches:
+                        return expanded_branches
+
+        # Then, expand other formulas
         for i, (sign, prefix, formula) in enumerate(branch):
             if isinstance(formula, Atom):
                 print(f"Atom found in branch, skipping: {Tableaux.formula_to_string(formula)}")
                 continue  # Skip atomic formulas
 
-            result = apply_rule(sign, prefix, formula, self.expanded_prefixes, self.accessibility)
+            if isinstance(formula, Box) and sign:
+                # Defer expansion of T [] formulas
+                continue
+
+            result = self.apply_rule(sign, prefix, formula)
 
             if result:
                 print(f"Formula expanded into: {result}")
@@ -257,25 +216,82 @@ class Tableaux:
                     print(
                         f"New full branch after expansion: {[(prefix, 'T' if sign else 'F', Tableaux.formula_to_string(formula)) for sign, prefix, formula in new_full_branch]}")
 
-                    # Recursively expand the new branch
                     if isinstance(formula, Or) and sign:
                         for sub_branch in new_branch:
                             expanded_branches.extend(
                                 self.expand_branch([sub_branch] + new_full_branch[i + 1:], depth + 1, node_id))
-                    elif isinstance(formula, (Box, Diamond)):
-                        expanded_branches = []
-                        for new_branch in result:
-                            new_full_branch = branch[:i] + new_branch + branch[i + 1:]
-                            expanded_branches.extend(self.expand_branch(new_full_branch, depth + 1, node_id))
-                        return expanded_branches
                     else:
                         expanded_branches.extend(self.expand_branch(new_full_branch, depth + 1, node_id))
                 return expanded_branches
+
+        # If no expansion was possible, expand deferred T [] formulas
+        t_box_formulas = [(i, (sign, prefix, formula)) for i, (sign, prefix, formula) in enumerate(branch)
+                          if isinstance(formula, Box) and sign]
+
+        for i, (sign, prefix, formula) in t_box_formulas:
+            result = self.apply_rule(sign, prefix, formula)
+            if result:
+                for new_branch in result:
+                    new_full_branch = branch[:i] + new_branch + branch[i + 1:]
+                    expanded_branches = self.expand_branch(new_full_branch, depth + 1, node_id)
+                    if expanded_branches:
+                        return expanded_branches
 
         # If no expansion was possible, return the branch as is
         print(
             f"No expansion possible for branch, returning as is: {[(prefix, 'T' if sign else 'F', Tableaux.formula_to_string(formula)) for sign, prefix, formula in branch]}")
         return [branch]
+
+    def apply_rule(self, sign: bool, prefix: str, formula: Formula) -> List[List[Tuple[bool, str, Formula]]]:
+        print(f"Applying rule to: {'T' if sign else 'F'} {prefix} {self.formula_to_string(formula)}")
+
+        if isinstance(formula, Atom):
+            return []  # No expansion needed for atomic formulas
+
+        elif isinstance(formula, Not):
+            return [[(not sign, prefix, formula.formula)]]
+
+        elif isinstance(formula, And):
+            if sign:
+                return [[(True, prefix, conj) for conj in formula.conjuncts]]
+            else:
+                return [[(False, prefix, conj)] for conj in formula.conjuncts]
+
+        elif isinstance(formula, Or):
+            if sign:
+                return [[(True, prefix, disj)] for disj in formula.disjuncts]
+            else:
+                return [[(False, prefix, disj) for disj in formula.disjuncts]]
+
+        elif isinstance(formula, Implies):
+            if sign:
+                return [[(False, prefix, formula.left)], [(True, prefix, formula.right)]]
+            else:
+                return [[(True, prefix, formula.left), (False, prefix, formula.right)]]
+
+        elif isinstance(formula, Box):
+            if sign:
+                result = []
+                for accessible_world in self.accessibility[prefix]:
+                    result.append((True, accessible_world, formula.formula))
+                return [result] if result else []
+            else:
+                new_world = f"{prefix}.{len(self.accessibility[prefix]) + 1}"
+                self.accessibility[prefix].add(new_world)
+                self.new_world_created = True
+                return [[(False, new_world, formula.formula)]]
+
+        elif isinstance(formula, Diamond):
+            if sign:
+                new_world = f"{prefix}.{len(self.accessibility[prefix]) + 1}"
+                self.accessibility[prefix].add(new_world)
+                self.new_world_created = True
+                return [[(True, new_world, formula.formula)]]
+            else:
+                result = []
+                for accessible_world in self.accessibility[prefix]:
+                    result.append((False, accessible_world, formula.formula))
+                return [result] if result else []
 
     def build_tree(self):
         self.graph = pydot.Dot(graph_type='digraph')
@@ -518,3 +534,85 @@ for formula_str in test_formulas:
 
         traceback.print_exc()
     print()
+
+
+
+
+
+###################################################
+
+# def apply_rule(sign: bool, prefix: str, formula: Formula, expanded_prefixes: set, accessibility: Dict[str,
+# Set[str]]) -> List[List[Tuple[bool, str, Formula]]]: print(f"Applying rule to: {'T' if sign else 'F'} {prefix} {
+# Tableaux.formula_to_string(formula)}")
+#
+#     if isinstance(formula, Atom):
+#         print(f"Atom formula: No expansion needed for {Tableaux.formula_to_string(formula)}")
+#         return []  # No expansion needed for atomic formulas
+#
+#     elif isinstance(formula, Not):
+#         print(f"Not formula: Expanding ~{Tableaux.formula_to_string(formula.formula)}")
+#         return [[(not sign, prefix, formula.formula)]]
+#
+#     elif isinstance(formula, And):
+#         if sign:
+#             print(f"And formula (True): Expanding conjunction {Tableaux.formula_to_string(formula)}")
+#             return [[(True, prefix, conj) for conj in formula.conjuncts]]
+#         else:
+#             print(f"And formula (False): Expanding conjunction {Tableaux.formula_to_string(formula)} into branches")
+#             return [[(False, prefix, conj)] for conj in formula.conjuncts]
+#
+#     elif isinstance(formula, Or):
+#         if sign:
+#             print(f"Or formula (True): Expanding disjunction {Tableaux.formula_to_string(formula)} into branches")
+#             return [[(True, prefix, disj)] for disj in formula.disjuncts]
+#         else:
+#             print(f"Or formula (False): Expanding disjunction {Tableaux.formula_to_string(formula)}")
+#             return [[(False, prefix, disj) for disj in formula.disjuncts]]
+#
+#     elif isinstance(formula, Implies):
+#         if sign:
+#             print(f"Implies formula (True): Expanding implication {Tableaux.formula_to_string(formula)}")
+#             return [[(False, prefix, formula.left)], [(True, prefix, formula.right)]]
+#         else:
+#             print(f"Implies formula (False): Expanding implication {Tableaux.formula_to_string(formula)}")
+#             return [[(True, prefix, formula.left), (False, prefix, formula.right)]]
+#
+#
+#     elif isinstance(formula, Box):
+#
+#         if sign:
+#
+#             result = []
+#
+#             for accessible_world in accessibility[prefix]:
+#                 result.append((True, accessible_world, formula.formula))
+#
+#             return [result] if result else []
+#
+#         else:
+#
+#             new_world = f"{prefix}.{len(accessibility[prefix]) + 1}"
+#
+#             accessibility[prefix].add(new_world)
+#
+#             return [[(False, new_world, formula.formula)]]
+#
+#
+#     elif isinstance(formula, Diamond):
+#
+#         if sign:
+#
+#             new_world = f"{prefix}.{len(accessibility[prefix]) + 1}"
+#
+#             accessibility[prefix].add(new_world)
+#
+#             return [[(True, new_world, formula.formula)]]
+#
+#         else:
+#
+#             result = []
+#
+#             for accessible_world in accessibility[prefix]:
+#                 result.append((False, accessible_world, formula.formula))
+#
+#             return [result] if result else []
