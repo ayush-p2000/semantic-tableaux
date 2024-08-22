@@ -435,6 +435,27 @@ class Tableaux:
                 print(f"  {prefix} {'T' if sign else 'F'} {self.formula_to_string(formula)}")
             print()
 
+    def save_accessibility_graph(self):
+        graph = nx.DiGraph()
+
+        # Add nodes and edges
+        for world in self.accessibility:
+            graph.add_node(world)
+            for accessible_world in self.accessibility[world]:
+                graph.add_edge(world, accessible_world)
+
+        # Create the plot
+        plt.figure(figsize=(8, 6))
+        pos = nx.spring_layout(graph)
+        nx.draw(graph, pos, with_labels=True, node_color='lightblue',
+                node_size=500, arrowsize=20, arrows=True)
+
+        # Save to a temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp_file:
+            plt.savefig(tmp_file.name)
+            plt.close()
+            return tmp_file.name
+
     @staticmethod
     def formula_to_string(formula: Formula) -> str:
         if isinstance(formula, Atom):
