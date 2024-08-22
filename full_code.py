@@ -5,7 +5,10 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Tuple, Set, Dict
 import logging
+
+import networkx as nx
 import pydot
+from matplotlib import pyplot as plt
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -317,6 +320,59 @@ class Tableaux:
         else:
             print("No reflexive worlds")
 
+
+    def visualize_accessibility(self):
+        """Visualizes the Kripke model accessibility relations."""
+        graph = nx.DiGraph()
+
+        # Add nodes for each world
+        for world in self.accessibility:
+            graph.add_node(world)
+
+        # Add edges based on accessibility relations, excluding self-loops
+        for world, accessible_worlds in self.accessibility.items():
+            for accessible_world in accessible_worlds:
+                if world != accessible_world:
+                    graph.add_edge(world, accessible_world)
+
+        # Choose a layout for better readability
+        pos = nx.shell_layout(graph)  # You can experiment with other layouts like:
+        # nx.spring_layout(graph, k=0.3, iterations=50)
+        # nx.circular_layout(graph)
+
+        # Draw the graph using matplotlib
+        plt.figure(figsize=(12, 8))
+
+        # Draw nodes with improved aesthetics
+        nx.draw_networkx_nodes(graph, pos, node_size=2000, node_color='lightblue',
+                               edgecolors='black', linewidths=2)
+        nx.draw_networkx_labels(graph, pos, font_size=12, font_weight='bold')
+
+        # Draw edges with improved aesthetics
+        nx.draw_networkx_edges(graph, pos, edge_color='gray', arrows=True,
+                               arrowsize=20, arrowstyle='->', connectionstyle='arc3,rad=0.2')
+
+        # Add circular arrows for reflexive edges with better positioning and style
+        for world in self.accessibility:
+            if world in self.accessibility[world]:
+                # Calculate loop position for better visibility
+                loop_pos = pos[world]
+                loop_pos += 0.2  # Adjust the x-coordinate for offset
+                nx.draw_networkx_edges(
+                    graph,
+                    pos,
+                    edgelist=[(world, world)],
+                    connectionstyle=f"arc3, rad=0.3",  # Adjust the radius for loop size
+                    arrowstyle='->',
+                    arrowsize=15,
+                    edge_color='gray'
+                )
+
+        plt.title("Kripke Model Accessibility", fontsize=16)
+        plt.axis('off')
+        # plt.tight_layout()
+        plt.show()
+
     def build_tree(self):
         self.graph = pydot.Dot(graph_type='digraph')
         self.graph.set_rankdir('TB')
@@ -539,6 +595,7 @@ for formula_str in test_formulas:
         try:
             satisfiability_solver.save_graph(filename='satisfiability_tableau.png')
             satisfiability_solver.print_accessibility()
+            satisfiability_solver.visualize_accessibility()
             print("Satisfiability tableau visualization saved as 'satisfiability_tableau.png'")
         except Exception as e:
             print(f"Error saving satisfiability tableau: {str(e)}")
