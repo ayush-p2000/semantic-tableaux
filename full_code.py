@@ -7,9 +7,9 @@ from typing import List, Tuple, Set, Dict
 import logging
 import pydot
 
-
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
 
 class TimeoutError(Exception):
     pass
@@ -123,7 +123,6 @@ class Tableaux:
         self.graph.set_node_defaults(shape='ellipse', style='filled', fillcolor='lightblue',
                                      width='2.5', height='1.2', fontsize='14')
         self.graph.set_edge_defaults(arrowhead='vee', arrowsize='0.9', penwidth='1.2')
-
 
     def check_validity(self, max_iterations=1000):
         self.branches = [[(False, "1", self.formula)]]
@@ -293,6 +292,31 @@ class Tableaux:
                     result.append((False, accessible_world, formula.formula))
                 return [result] if result else []
 
+    def print_accessibility(self):
+        print("\nKripke World Relationships:")
+        for world in sorted(self.accessibility.keys()):
+            accessible_worlds = sorted(self.accessibility[world])
+            if len(accessible_worlds) == 1 and accessible_worlds[0] == world:
+                print(f"World {world}: reflexive, no other accessible worlds")
+            else:
+                other_worlds = [w for w in accessible_worlds if w != world]
+                if world in accessible_worlds:
+                    if other_worlds:
+                        print(f"World {world}: reflexive, can access {', '.join(other_worlds)}")
+                    else:
+                        print(f"World {world}: reflexive")
+                elif other_worlds:
+                    print(f"World {world}: can access {', '.join(other_worlds)}")
+                else:
+                    print(f"World {world}: no accessible worlds")
+
+        print("\nReflexive worlds:")
+        reflexive_worlds = [world for world, accessible in self.accessibility.items() if world in accessible]
+        if reflexive_worlds:
+            print(", ".join(sorted(reflexive_worlds)))
+        else:
+            print("No reflexive worlds")
+
     def build_tree(self):
         self.graph = pydot.Dot(graph_type='digraph')
         self.graph.set_rankdir('TB')
@@ -448,7 +472,7 @@ test_formulas = [
     # "<>(p & q) -> (<>p & <>q)",    # Valid and Satisfiable
     # "[]p -> <>p",                  # Not valid in general, but Satisfiable
     # "<>[]p -> []p",                # Not valid in general, but Satisfiable
-    "[](p | q) -> ([]p | []q)",    # Not valid, but Satisfiable
+    # "[](p | q) -> ([]p | []q)",    # Not valid, but Satisfiable
     # "[]p -> []<>p",                # Valid in S5
     # "<>[]p -> []p",                # Valid in S5
     # "[]<>[]p -> []p",              # Valid in S5
@@ -456,13 +480,15 @@ test_formulas = [
     # "<>(p -> q) -> ([]p -> <>q)",  # Valid and Satisfiable
     # "[]p -> (q -> []q)",           # Not valid, but Satisfiable
     # "<>(p & ~p)",                  # Not valid, Not Satisfiable (contradiction)
-    # "<>p"
-    # "(p | ~p)"
+    # "<>p",
+    # "(p | ~p)",
     # "(p & ~q)|(~p&r)",
     # "(p|q)->r",
     # "p & (p -> ~p)",
     # "(p&~q)&(q->~p)",
     # "p|~p",
+    "[](p | q) -> ([]p | <>q)"
+    # "[][][][][]p"
 ]
 
 for formula_str in test_formulas:
@@ -512,6 +538,7 @@ for formula_str in test_formulas:
         satisfiability_solver.print_tableau()
         try:
             satisfiability_solver.save_graph(filename='satisfiability_tableau.png')
+            satisfiability_solver.print_accessibility()
             print("Satisfiability tableau visualization saved as 'satisfiability_tableau.png'")
         except Exception as e:
             print(f"Error saving satisfiability tableau: {str(e)}")
@@ -534,10 +561,6 @@ for formula_str in test_formulas:
 
         traceback.print_exc()
     print()
-
-
-
-
 
 ###################################################
 
