@@ -528,7 +528,7 @@ test_formulas = [
     # "<>(p & q) -> (<>p & <>q)",    # Valid and Satisfiable
     # "[]p -> <>p",                  # Not valid in general, but Satisfiable
     # "<>[]p -> []p",                # Not valid in general, but Satisfiable
-    # "[](p | q) -> ([]p | []q)",    # Not valid, but Satisfiable
+    "[](p | q) -> ([]p | []q)",    # Not valid, but Satisfiable
     # "[]p -> []<>p",                # Valid in S5
     # "<>[]p -> []p",                # Valid in S5
     # "[]<>[]p -> []p",              # Valid in S5
@@ -543,7 +543,7 @@ test_formulas = [
     # "p & (p -> ~p)",
     # "(p&~q)&(q->~p)",
     # "p|~p",
-    "[](p | q) -> ([]p | <>q)"
+    # "[](p | q) -> ([]p | <>q)"
     # "[][][][][]p"
 ]
 
@@ -571,6 +571,7 @@ for formula_str in test_formulas:
         validity_solver.print_tableau()
         try:
             validity_solver.save_graph(filename='validity_tableau.png')
+            validity_solver.visualize_accessibility()
             print("Validity tableau visualization saved as 'validity_tableau.png'")
         except Exception as e:
             print(f"Error saving validity tableau: {str(e)}")
@@ -618,81 +619,3 @@ for formula_str in test_formulas:
 
         traceback.print_exc()
     print()
-
-###################################################
-
-# def apply_rule(sign: bool, prefix: str, formula: Formula, expanded_prefixes: set, accessibility: Dict[str,
-# Set[str]]) -> List[List[Tuple[bool, str, Formula]]]: print(f"Applying rule to: {'T' if sign else 'F'} {prefix} {
-# Tableaux.formula_to_string(formula)}")
-#
-#     if isinstance(formula, Atom):
-#         print(f"Atom formula: No expansion needed for {Tableaux.formula_to_string(formula)}")
-#         return []  # No expansion needed for atomic formulas
-#
-#     elif isinstance(formula, Not):
-#         print(f"Not formula: Expanding ~{Tableaux.formula_to_string(formula.formula)}")
-#         return [[(not sign, prefix, formula.formula)]]
-#
-#     elif isinstance(formula, And):
-#         if sign:
-#             print(f"And formula (True): Expanding conjunction {Tableaux.formula_to_string(formula)}")
-#             return [[(True, prefix, conj) for conj in formula.conjuncts]]
-#         else:
-#             print(f"And formula (False): Expanding conjunction {Tableaux.formula_to_string(formula)} into branches")
-#             return [[(False, prefix, conj)] for conj in formula.conjuncts]
-#
-#     elif isinstance(formula, Or):
-#         if sign:
-#             print(f"Or formula (True): Expanding disjunction {Tableaux.formula_to_string(formula)} into branches")
-#             return [[(True, prefix, disj)] for disj in formula.disjuncts]
-#         else:
-#             print(f"Or formula (False): Expanding disjunction {Tableaux.formula_to_string(formula)}")
-#             return [[(False, prefix, disj) for disj in formula.disjuncts]]
-#
-#     elif isinstance(formula, Implies):
-#         if sign:
-#             print(f"Implies formula (True): Expanding implication {Tableaux.formula_to_string(formula)}")
-#             return [[(False, prefix, formula.left)], [(True, prefix, formula.right)]]
-#         else:
-#             print(f"Implies formula (False): Expanding implication {Tableaux.formula_to_string(formula)}")
-#             return [[(True, prefix, formula.left), (False, prefix, formula.right)]]
-#
-#
-#     elif isinstance(formula, Box):
-#
-#         if sign:
-#
-#             result = []
-#
-#             for accessible_world in accessibility[prefix]:
-#                 result.append((True, accessible_world, formula.formula))
-#
-#             return [result] if result else []
-#
-#         else:
-#
-#             new_world = f"{prefix}.{len(accessibility[prefix]) + 1}"
-#
-#             accessibility[prefix].add(new_world)
-#
-#             return [[(False, new_world, formula.formula)]]
-#
-#
-#     elif isinstance(formula, Diamond):
-#
-#         if sign:
-#
-#             new_world = f"{prefix}.{len(accessibility[prefix]) + 1}"
-#
-#             accessibility[prefix].add(new_world)
-#
-#             return [[(True, new_world, formula.formula)]]
-#
-#         else:
-#
-#             result = []
-#
-#             for accessible_world in accessibility[prefix]:
-#                 result.append((False, accessible_world, formula.formula))
-#
-#             return [result] if result else []
