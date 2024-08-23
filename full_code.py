@@ -128,11 +128,18 @@ class Tableaux:
         self.graph.set_edge_defaults(arrowhead='vee', arrowsize='0.9', penwidth='1.2')
 
     def check_validity(self, max_iterations=1000):
-        self.branches = [[(False, "1", self.formula)]]
-        return self.solve(max_iterations)
+        # Check if the formula is valid by checking if its negation is unsatisfiable
+        is_negation_satisfiable = self.check_satisfiability(max_iterations)
+
+        if not is_negation_satisfiable:
+            print("The negation is a contradiction, therefore the formula is valid.")
+            return True
+
+        # If the negation is satisfiable, the formula is not valid
+        return False
 
     def check_satisfiability(self, max_iterations=1000):
-        self.branches = [[(True, "1", self.formula)]]
+        self.branches = [[(False, "1", self.formula)]]
         return not self.solve(max_iterations)
 
     def solve(self, max_iterations):
@@ -319,7 +326,6 @@ class Tableaux:
             print(", ".join(sorted(reflexive_worlds)))
         else:
             print("No reflexive worlds")
-
 
     def visualize_accessibility(self):
         """Visualizes the Kripke model accessibility relations."""
@@ -549,7 +555,7 @@ test_formulas = [
     # "<>(p & q) -> (<>p & <>q)",    # Valid and Satisfiable
     # "[]p -> <>p",                  # Not valid in general, but Satisfiable
     # "<>[]p -> []p",                # Not valid in general, but Satisfiable
-    "[](p | q) -> ([]p | []q)",    # Not valid, but Satisfiable
+    # "[](p | q) -> ([]p | []q)",    # Not valid, but Satisfiable
     # "[]p -> []<>p",                # Valid in S5
     # "<>[]p -> []p",                # Valid in S5
     # "[]<>[]p -> []p",              # Valid in S5
@@ -566,6 +572,9 @@ test_formulas = [
     # "p|~p",
     # "[](p | q) -> ([]p | <>q)"
     # "[][][][][]p"
+    # "(p -> (q | z))"
+    "<>(p | q) -> (<>p | <>q)"
+    # "<>p -> []p"
 ]
 
 for formula_str in test_formulas:
@@ -592,7 +601,7 @@ for formula_str in test_formulas:
         validity_solver.print_tableau()
         try:
             validity_solver.save_graph(filename='validity_tableau.png')
-            validity_solver.visualize_accessibility()
+            # validity_solver.visualize_accessibility()
             print("Validity tableau visualization saved as 'validity_tableau.png'")
         except Exception as e:
             print(f"Error saving validity tableau: {str(e)}")
@@ -617,7 +626,7 @@ for formula_str in test_formulas:
         try:
             satisfiability_solver.save_graph(filename='satisfiability_tableau.png')
             satisfiability_solver.print_accessibility()
-            satisfiability_solver.visualize_accessibility()
+            # satisfiability_solver.visualize_accessibility()
             print("Satisfiability tableau visualization saved as 'satisfiability_tableau.png'")
         except Exception as e:
             print(f"Error saving satisfiability tableau: {str(e)}")

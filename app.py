@@ -167,11 +167,111 @@ def analyze_formula_structure(formula_str):
 
     return analysis
 
+
+def display_solution(solution):
+    formula_str, is_valid, is_satisfiable, parsed_formula, validity_image_path, satisfiability_image_path, \
+        validity_accessibility_image_path, satisfiability_accessibility_image_path = solution
+
+    st.write(f"Parsed formula: {parsed_formula}")
+
+    st.subheader("Validity Check")
+    if is_valid:
+        st.success(f"The formula is valid.")
+    else:
+        st.error(f"The formula is not valid.")
+
+    if validity_image_path:
+        st.image(validity_image_path, caption='Validity Tableau Visualization')
+
+    if validity_accessibility_image_path:
+        st.image(validity_accessibility_image_path, caption='Validity Accessibility Graph')
+
+    st.subheader("Satisfiability Check")
+    if is_satisfiable:
+        st.success(f"The formula is satisfiable.")
+    else:
+        st.error(f"The formula is not satisfiable (contradiction).")
+
+    if satisfiability_image_path:
+        st.image(satisfiability_image_path, caption='Satisfiability Tableau Visualization')
+
+    if satisfiability_accessibility_image_path:
+        st.image(satisfiability_accessibility_image_path, caption='Satisfiability Accessibility Graph')
+
+    st.subheader("Conclusion")
+    if is_valid and is_satisfiable:
+        st.write("The formula is valid and satisfiable.")
+    elif is_satisfiable:
+        st.write("The formula is satisfiable but not valid.")
+    else:
+        st.write("The formula is not satisfiable (contradiction).")
+
+    st.subheader("Analysis")
+    analysis = analyze_result(is_valid, is_satisfiable, parsed_formula)
+    st.markdown(analysis)
+
+    st.subheader("Formula Structure Analysis")
+    structure_analysis = analyze_formula_structure(parsed_formula)
+    st.write(structure_analysis)
+
+
+def select_solution(index):
+    st.session_state.selected_index = index
+    st.session_state.current_formula = st.session_state.solutions[index][0]
+    st.session_state.editing = True
+
+
 def main():
     st.title("Semantic Tableaux Solver")
 
-    if "chat_messages" not in st.session_state:
-        st.session_state.chat_messages = []
+    if "solutions" not in st.session_state:
+        st.session_state.solutions = []
+
+    if "current_formula" not in st.session_state:
+        st.session_state.current_formula = "p & q"
+
+    if "selected_index" not in st.session_state:
+        st.session_state.selected_index = None
+
+    if "editing" not in st.session_state:
+        st.session_state.editing = False
+
+    # Sidebar
+    st.sidebar.title("Solution History")
+    solutions_to_remove = []
+    for i, solution in enumerate(st.session_state.solutions):
+        col1, col2 = st.sidebar.columns([5, 1])
+        with col1:
+            if st.button(f"Solution {i + 1}: {solution[0]}", key=f"solution_{i}", use_container_width=True,
+                         on_click=select_solution, args=(i,)):
+                pass
+        with col2:
+            if st.button("🗑️", key=f"delete_{i}", help="Delete this solution"):
+                solutions_to_remove.append(i)
+
+    # Remove deleted solutions
+    if solutions_to_remove:
+        for index in reversed(solutions_to_remove):
+            if 0 <= index < len(st.session_state.solutions):
+                del st.session_state.solutions[index]
+                if st.session_state.selected_index is not None:
+                    if index < st.session_state.selected_index:
+                        st.session_state.selected_index -= 1
+                    elif index == st.session_state.selected_index:
+                        st.session_state.selected_index = None
+                        st.session_state.current_formula = "p & q"
+                        st.session_state.editing = False
+        if st.session_state.solutions:
+            if st.session_state.selected_index is None or st.session_state.selected_index >= len(
+                    st.session_state.solutions):
+                st.session_state.selected_index = len(st.session_state.solutions) - 1
+                st.session_state.current_formula = st.session_state.solutions[st.session_state.selected_index][0]
+                st.session_state.editing = True
+        else:
+            st.session_state.selected_index = None
+            st.session_state.current_formula = "p & q"
+            st.session_state.editing = False
+        st.rerun()
 
     # Main content
     st.write("""
@@ -189,7 +289,12 @@ def main():
     You can use parentheses to group expressions.
     """)
 
-    formula_str = st.text_area("Enter the formula:", value="p & q")
+    formula_str = st.text_input("Enter the formula:", value=st.session_state.current_formula, key="formula_input")
+
+    if formula_str != st.session_state.current_formula:
+        st.session_state.current_formula = formula_str
+        if not st.session_state.editing:
+            st.session_state.selected_index = None
 
     if st.button("Solve"):
         logger.debug(f"Solve button clicked with formula: {formula_str}")
@@ -197,116 +302,25 @@ def main():
          validity_accessibility_image_path, satisfiability_accessibility_image_path) = solve_formula(formula_str)
 
         if is_valid is not None and is_satisfiable is not None:
-            st.write(f"Parsed formula: {parsed_formula}")
+            solution = (formula_str, is_valid, is_satisfiable, parsed_formula, validity_image_path,
+                        satisfiability_image_path, validity_accessibility_image_path,
+                        satisfiability_accessibility_image_path)
 
-            st.subheader("Validity Check")
-            if is_valid:
-                st.success(f"The formula is valid.")
+            if st.session_state.editing and st.session_state.selected_index is not None:
+                # Update existing solution
+                st.session_state.solutions[st.session_state.selected_index] = solution
             else:
-                st.error(f"The formula is not valid.")
+                # Add new solution
+                st.session_state.solutions.append(solution)
+                st.session_state.selected_index = len(st.session_state.solutions) - 1
 
-            if validity_image_path:
-                st.image(validity_image_path, caption='Validity Tableau Visualization')
-                os.unlink(validity_image_path)
-
-            if validity_accessibility_image_path:
-                st.image(validity_accessibility_image_path, caption='Validity Accessibility Graph')
-                os.unlink(validity_accessibility_image_path)
-
-            st.subheader("Satisfiability Check")
-            if is_satisfiable:
-                st.success(f"The formula is satisfiable.")
-            else:
-                st.error(f"The formula is not satisfiable (contradiction).")
-
-            if satisfiability_image_path:
-                st.image(satisfiability_image_path, caption='Satisfiability Tableau Visualization')
-                os.unlink(satisfiability_image_path)
-
-            if satisfiability_accessibility_image_path:
-                st.image(satisfiability_accessibility_image_path, caption='Satisfiability Accessibility Graph')
-                os.unlink(satisfiability_accessibility_image_path)
-
-            st.subheader("Conclusion")
-            if is_valid and is_satisfiable:
-                st.write("The formula is valid and satisfiable.")
-            elif is_satisfiable:
-                st.write("The formula is satisfiable but not valid.")
-            else:
-                st.write("The formula is not satisfiable (contradiction).")
-
-            st.subheader("Analysis")
-            analysis = analyze_result(is_valid, is_satisfiable, parsed_formula)
-
-            st.markdown(analysis)
-
-            st.subheader("Formula Structure Analysis")
-            structure_analysis = analyze_formula_structure(parsed_formula)
-            st.write(structure_analysis)
+            st.session_state.current_formula = formula_str
+            st.session_state.editing = False
         else:
             st.error(f"Error: {parsed_formula}")
 
-    # Sidebar chat with AI icon and fixed input box
-    st.sidebar.markdown(
-        """
-        <style>
-        .sidebar-icon {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        .sidebar-icon img {
-            width: 60px;
-            height: 60px;
-        }
-        .fixed-input {
-            position: fixed;
-            bottom: 20px;
-            width: 100%;
-            background-color: #333;
-            padding: 10px;
-            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.2);
-            z-index: 1000;
-        }
-        </style>
-        <div class="sidebar-icon">
-            <img src="https://cdn-icons-png.flaticon.com/512/4712/4712027.png" alt="AI Bot Icon">
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.sidebar.title("Chat with AI")
-    for message in st.session_state.chat_messages:
-        with st.sidebar.chat_message(message["role"]):
-            st.sidebar.markdown(message["content"])
-
-    if prompt := st.sidebar.text_input("What is your question?", key="fixed_input", label_visibility="collapsed"):
-        st.session_state.chat_messages.append({"role": "user", "content": prompt})
-        with st.sidebar.chat_message("user"):
-            st.sidebar.markdown(prompt)
-        with st.sidebar.chat_message("assistant"):
-            response = process_chat_input(prompt)
-            st.sidebar.markdown(response)
-        st.session_state.chat_messages.append({"role": "assistant", "content": response})
-
-    st.sidebar.markdown(
-        """
-        <style>
-        #fixed_input {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            background-color: #0E1117;
-            padding: 10px;
-            z-index: 9999;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+    if st.session_state.selected_index is not None:
+        display_solution(st.session_state.solutions[st.session_state.selected_index])
 
 
 if __name__ == "__main__":
