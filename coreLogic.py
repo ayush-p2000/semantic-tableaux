@@ -127,19 +127,23 @@ class Tableaux:
                                      width='2.5', height='1.2', fontsize='14')
         self.graph.set_edge_defaults(arrowhead='vee', arrowsize='0.9', penwidth='1.2')
 
+    def get_tableau_structure(self):
+        def build_structure(node_id):
+            node = self.tree[node_id]
+            return {
+                'label': node['label'],
+                'children': [build_structure(child_id) for child_id in node['children']]
+            }
+
+        root = next(iter(self.tree))
+        return build_structure(root)
+
     def check_validity(self, max_iterations=1000):
-        # Check if the formula is valid by checking if its negation is unsatisfiable
-        is_negation_satisfiable = self.check_satisfiability(max_iterations)
-
-        if not is_negation_satisfiable:
-            print("The negation is a contradiction, therefore the formula is valid.")
-            return True
-
-        # If the negation is satisfiable, the formula is not valid
-        return False
+        self.branches = [[(False, "1", self.formula)]]
+        return self.solve(max_iterations)
 
     def check_satisfiability(self, max_iterations=1000):
-        self.branches = [[(False, "1", self.formula)]]
+        self.branches = [[(True, "1", self.formula)]]
         return not self.solve(max_iterations)
 
     def solve(self, max_iterations):
@@ -278,16 +282,26 @@ class Tableaux:
             else:
                 return [[(True, prefix, formula.left), (False, prefix, formula.right)]]
 
+
         elif isinstance(formula, Box):
+
             if sign:
+
                 result = []
+
                 for accessible_world in self.accessibility[prefix]:
                     result.append((True, accessible_world, formula.formula))
+
                 return [result] if result else []
+
             else:
+
                 new_world = f"{prefix}.{len(self.accessibility[prefix]) + 1}"
+
                 self.accessibility[prefix].add(new_world)
-                self.new_world_created = True
+
+                self.accessibility[new_world] = set()  # Initialize accessibility for the new world
+
                 return [[(False, new_world, formula.formula)]]
 
         elif isinstance(formula, Diamond):
@@ -569,12 +583,16 @@ test_formulas = [
     # "(p|q)->r",
     # "p & (p -> ~p)",
     # "(p&~q)&(q->~p)",
-    # "p|~p",
+    # "p&~p",
     # "[](p | q) -> ([]p | <>q)"
     # "[][][][][]p"
     # "(p -> (q | z))"
-    "<>(p | q) -> (<>p | <>q)"
+    # "<>(p | q) -> (<>p | <>q)"
     # "<>p -> []p"
+    # "p -> (p | q)"
+    # "p & ~p"
+    # "~(P & Q) | R"
+    "<>p -> ~[]~p"
 ]
 
 for formula_str in test_formulas:

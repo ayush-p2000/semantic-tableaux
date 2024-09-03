@@ -1,7 +1,7 @@
 import streamlit as st
 import logging
 import os
-from full_code import custom_parse_formula, Tableaux
+from coreLogic import custom_parse_formula, Tableaux
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -42,9 +42,15 @@ def solve_formula(formula_str: str):
                 validity_image_path, satisfiability_image_path,
                 validity_accessibility_image_path, satisfiability_accessibility_image_path)
 
+    except ValueError as ve:
+        logger.error(f"ValueError in solve_formula: {str(ve)}", exc_info=True)
+        return None, None, "INVALID", None, None, None, None
+    except TimeoutError as te:
+        logger.error(f"TimeoutError in solve_formula: {str(te)}", exc_info=True)
+        return None, None, f"Computation timed out: {str(te)}", None, None, None, None
     except Exception as e:
-        logger.error(f"Error in solve_formula: {str(e)}", exc_info=True)
-        return None, None, str(e), None, None, None, None
+        logger.error(f"Unexpected error in solve_formula: {str(e)}", exc_info=True)
+        return None, None, f"An unexpected error occurred: {str(e)}", None, None, None, None
 
 
 def analyze_result(is_valid, is_satisfiable, formula_str):
@@ -316,9 +322,13 @@ def main():
 
             st.session_state.current_formula = formula_str
             st.session_state.editing = False
+            st.rerun()
         else:
-            st.error(f"Error: {parsed_formula}")
-
+            if parsed_formula == "INVALID":
+                st.error("Invalid formula. Please check your input and try again.")
+            else:
+                st.error(parsed_formula)  # Display other error messages
+            logger.error(f"Error solving formula: {parsed_formula}")
     if st.session_state.selected_index is not None:
         display_solution(st.session_state.solutions[st.session_state.selected_index])
 
