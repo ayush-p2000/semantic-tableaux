@@ -282,33 +282,23 @@ class Tableaux:
             else:
                 return [[(True, prefix, formula.left), (False, prefix, formula.right)]]
 
-
         elif isinstance(formula, Box):
-
             if sign:
-
                 result = []
-
                 for accessible_world in self.accessibility[prefix]:
                     result.append((True, accessible_world, formula.formula))
-
                 return [result] if result else []
-
             else:
-
                 new_world = f"{prefix}.{len(self.accessibility[prefix]) + 1}"
-
                 self.accessibility[prefix].add(new_world)
-
-                self.accessibility[new_world] = set()  # Initialize accessibility for the new world
-
+                self.accessibility[new_world] = set()
                 return [[(False, new_world, formula.formula)]]
 
         elif isinstance(formula, Diamond):
             if sign:
                 new_world = f"{prefix}.{len(self.accessibility[prefix]) + 1}"
                 self.accessibility[prefix].add(new_world)
-                self.new_world_created = True
+                self.accessibility[new_world] = set()
                 return [[(True, new_world, formula.formula)]]
             else:
                 result = []
