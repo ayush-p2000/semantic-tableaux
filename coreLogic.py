@@ -291,14 +291,14 @@ class Tableaux:
             else:
                 new_world = f"{prefix}.{len(self.accessibility[prefix]) + 1}"
                 self.accessibility[prefix].add(new_world)
-                self.accessibility[new_world] = set()
+                self.new_world_created = True
                 return [[(False, new_world, formula.formula)]]
 
         elif isinstance(formula, Diamond):
             if sign:
                 new_world = f"{prefix}.{len(self.accessibility[prefix]) + 1}"
                 self.accessibility[prefix].add(new_world)
-                self.accessibility[new_world] = set()
+                self.new_world_created = True
                 return [[(True, new_world, formula.formula)]]
             else:
                 result = []
