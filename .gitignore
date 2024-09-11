@@ -1,4 +1,5 @@
 /.idea
+/.venv
 __pycache__
 satisfiability_tableau.png
 validity_tableau.png
