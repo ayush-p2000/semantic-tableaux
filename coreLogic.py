@@ -1,4 +1,3 @@
-import io
 import tempfile
 import threading
 from collections import defaultdict
@@ -196,9 +195,9 @@ class Tableaux:
 
         node_id = self.add_node(branch, parent_id)
 
-        # First, expand all F [] formulas
+        # First, expand all F [] and T <> formulas
         f_box_formulas = [(i, (sign, prefix, formula)) for i, (sign, prefix, formula) in enumerate(branch)
-                          if isinstance(formula, Box) and not sign]
+                          if isinstance(formula, Box) and not sign or isinstance(formula, Diamond) and sign]
 
         for i, (sign, prefix, formula) in f_box_formulas:
             result = self.apply_rule(sign, prefix, formula)
@@ -215,8 +214,8 @@ class Tableaux:
                 print(f"Atom found in branch, skipping: {Tableaux.formula_to_string(formula)}")
                 continue  # Skip atomic formulas
 
-            if isinstance(formula, Box) and sign:
-                # Defer expansion of T [] formulas
+            if isinstance(formula, Box) and sign or isinstance(formula, Diamond) and not sign:
+                # Defer expansion of T [] and F <> formulas
                 continue
 
             result = self.apply_rule(sign, prefix, formula)
@@ -239,7 +238,7 @@ class Tableaux:
 
         # If no expansion was possible, expand deferred T [] formulas
         t_box_formulas = [(i, (sign, prefix, formula)) for i, (sign, prefix, formula) in enumerate(branch)
-                          if isinstance(formula, Box) and sign]
+                          if isinstance(formula, Box) and sign or isinstance(formula, Diamond) and sign]
 
         for i, (sign, prefix, formula) in t_box_formulas:
             result = self.apply_rule(sign, prefix, formula)
@@ -380,7 +379,7 @@ class Tableaux:
 
         plt.title("Kripke Model Accessibility", fontsize=16)
         plt.axis('off')
-        # plt.tight_layout()
+        plt.tight_layout()
         plt.show()
 
     def build_tree(self):
@@ -582,6 +581,9 @@ test_formulas = [
     # "p -> (p | q)"
     # "p & ~p"
     # "~(P & Q) | R"
+    # "<>p -> []<>p"
+    # "[]p -> [](p | q)"
+    # "[]p -> r & <>q | ~s"
     "<>p -> ~[]~p"
 ]
 
