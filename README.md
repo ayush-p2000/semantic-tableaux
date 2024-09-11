@@ -13,7 +13,7 @@ The Semantic Tableaux Solver is a web application that uses the tableau method t
 - Provide detailed analysis of formula properties
 - Store and manage solution history
 
-## Installation
+## Github Installation
 
 1. Clone the repository:
    ```
@@ -27,6 +27,24 @@ The Semantic Tableaux Solver is a web application that uses the tableau method t
    ```
 
 3. Run the Streamlit app:
+   ```
+   streamlit run app.py
+   ```
+   
+## Manual Installation
+
+1. Unzip the downloaded zip file.
+####
+2. Open the folder in your IDE (PyCharm, VSCode, etc.)
+####
+3. Open Terminal in the path of your project folder and type down the commands below. 
+####
+4. Install the required dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+5. Run the Streamlit app:
    ```
    streamlit run app.py
    ```
