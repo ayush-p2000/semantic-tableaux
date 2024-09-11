@@ -17,6 +17,9 @@ class TimeoutError(Exception):
     pass
 
 
+# Multithreading logic. For current solution, this is not required. Normal single threaded code is working fast
+# enough This can be implemented for the increase in complexity and further concepts in Modal Logic followed by more
+# complex Kripke Model diagram generation
 def run_with_timeout(func, args=(), kwargs={}, timeout_duration=10):
     result = [TimeoutError('function {} timed out after {} seconds'.format(func.__name__, timeout_duration))]
 
@@ -36,6 +39,7 @@ def run_with_timeout(func, args=(), kwargs={}, timeout_duration=10):
     return result[0]
 
 
+# Data classes for each literal in Propositional Logic and Modal Logic
 @dataclass
 class Formula:
     pass
@@ -80,14 +84,7 @@ class Diamond(Formula):
 Branch = List[Tuple[bool, str, Formula]]
 
 
-def is_satisfied(formula, pos, neg):
-    if isinstance(formula, Atom):
-        return formula.name in pos
-    elif isinstance(formula, Not):
-        return formula.formula.name in neg
-    return False
-
-
+# Checking for a closed branch
 def is_closed(branch: Branch, accessibility: Dict[str, Set[str]]) -> bool:
     world_formulas = defaultdict(lambda: (set(), set()))
     for sign, world, formula in branch:
@@ -137,14 +134,17 @@ class Tableaux:
         root = next(iter(self.tree))
         return build_structure(root)
 
+    # Checking Validity
     def check_validity(self, max_iterations=1000):
         self.branches = [[(False, "1", self.formula)]]
         return self.solve(max_iterations)
 
+    # Checking Satisfiability
     def check_satisfiability(self, max_iterations=1000):
         self.branches = [[(True, "1", self.formula)]]
         return not self.solve(max_iterations)
 
+    # Checking the solution has contradictions or not
     def solve(self, max_iterations):
         for iteration in range(max_iterations):
             print(f"Iteration {iteration}, branches: {len(self.branches)}")
@@ -167,6 +167,7 @@ class Tableaux:
         all_closed = all(is_closed(branch, self.accessibility) for branch in self.branches)
         return all_closed
 
+    # Deferred Branching for T[] and F<>
     def apply_deferred_expansions(self):
         """Process the deferred expansions for T [] and F <> formulas"""
         print(f"Processing deferred expansions: {len(self.deferred_expansions)}")
@@ -185,6 +186,7 @@ class Tableaux:
             new_branches.extend(expanded_branches)
         return new_branches
 
+    # Tableaux Tree Branching
     def expand_branch(self, branch, depth=0, parent_id=None):
         print(
             f"\nExpanding branch at depth {depth}: {[(prefix, 'T' if sign else 'F', Tableaux.formula_to_string(formula)) for sign, prefix, formula in branch]}")
@@ -254,6 +256,7 @@ class Tableaux:
             f"No expansion possible for branch, returning as is: {[(prefix, 'T' if sign else 'F', Tableaux.formula_to_string(formula)) for sign, prefix, formula in branch]}")
         return [branch]
 
+    # Propositional and Modal logic rules application
     def apply_rule(self, sign: bool, prefix: str, formula: Formula) -> List[List[Tuple[bool, str, Formula]]]:
         print(f"Applying rule to: {'T' if sign else 'F'} {prefix} {self.formula_to_string(formula)}")
 
@@ -330,6 +333,7 @@ class Tableaux:
         else:
             print("No reflexive worlds")
 
+    # Visualize Kripke Accessibility Relation
     def visualize_accessibility(self):
         """Visualizes the Kripke model accessibility relations."""
         graph = nx.DiGraph()
@@ -361,7 +365,6 @@ class Tableaux:
         nx.draw_networkx_edges(graph, pos, edge_color='gray', arrows=True,
                                arrowsize=20, arrowstyle='->', connectionstyle='arc3,rad=0.2')
 
-        # Add circular arrows for reflexive edges with better positioning and style
         for world in self.accessibility:
             if world in self.accessibility[world]:
                 # Calculate loop position for better visibility
@@ -411,6 +414,7 @@ class Tableaux:
             self.graph.add_edge(pydot.Edge(node, child_node))
         return node
 
+    # Creating nodes of tree
     def add_node(self, formulas: List[Tuple[bool, str, Formula]], parent_id: str = None) -> str:
         label = "\\n".join(
             f"{prefix} {'T' if sign else 'F'} {self.formula_to_string(formula)}" for sign, prefix, formula in formulas)
@@ -424,6 +428,7 @@ class Tableaux:
     def save_graph(self, filename='tableau.png'):
         self.graph.write_png(filename, prog='dot')
 
+    # Saving graph locally and sending to client
     def save_graph_to_file(self) -> str:
         logger.debug("Entering save_graph_to_file method")
         try:
@@ -437,6 +442,7 @@ class Tableaux:
             logger.error(f"Error in save_graph_to_file: {str(e)}")
             raise
 
+    # Print Tableaux Branching
     def print_tableau(self):
         for i, branch in enumerate(self.branches):
             print(f"Branch {i}:")
@@ -485,6 +491,7 @@ class Tableaux:
             raise ValueError(f"Unknown formula type: {type(formula)}")
 
 
+# Formula Parser
 def custom_parse_formula(s: str) -> Formula:
     s = s.replace(' ', '')  # Remove all spaces
     s = s.replace('□', '[]')  # Replace □ with []
@@ -548,42 +555,6 @@ def custom_parse_formula(s: str) -> Formula:
 
 # Test formulas and main execution
 test_formulas = [
-    # "<>(p | ~p)",                  # Valid and Satisfiable
-    # "[](p -> p)",                  # Valid and Satisfiable
-    # "<>p -> []<>p",                # Valid in S5 modal logic
-    # "[]p -> p",  # Valid (T axiom)
-    # "[]p -> [][]p",                # Valid in S4 modal logic
-    # "<>[]p -> []<>p",              # Valid in S5 modal logic
-    # "[](<>p -> q) -> (<>[]p -> []q)",  # Valid (McKinsey's formula)
-    # "<>(p & q) -> (<>p & <>q)",    # Valid and Satisfiable
-    # "[]p -> <>p",                  # Not valid in general, but Satisfiable
-    # "<>[]p -> []p",                # Not valid in general, but Satisfiable
-    # "[](p | q) -> ([]p | []q)",    # Not valid, but Satisfiable
-    # "[]p -> []<>p",                # Valid in S5
-    # "<>[]p -> []p",                # Valid in S5
-    # "[]<>[]p -> []p",              # Valid in S5
-    # "([]p & []q) -> [](p & q)",    # Valid and Satisfiable
-    # "<>(p -> q) -> ([]p -> <>q)",  # Valid and Satisfiable
-    # "[]p -> (q -> []q)",           # Not valid, but Satisfiable
-    # "<>(p & ~p)",                  # Not valid, Not Satisfiable (contradiction)
-    # "<>p",
-    # "(p | ~p)",
-    # "(p & ~q)|(~p&r)",
-    # "(p|q)->r",
-    # "p & (p -> ~p)",
-    # "(p&~q)&(q->~p)",
-    # "p&~p",
-    # "[](p | q) -> ([]p | <>q)"
-    # "[][][][][]p"
-    # "(p -> (q | z))"
-    # "<>(p | q) -> (<>p | <>q)"
-    # "<>p -> []p"
-    # "p -> (p | q)"
-    # "p & ~p"
-    # "~(P & Q) | R"
-    # "<>p -> []<>p"
-    # "[]p -> [](p | q)"
-    # "[]p -> r & <>q | ~s"
     "<>p -> ~[]~p"
 ]
 
